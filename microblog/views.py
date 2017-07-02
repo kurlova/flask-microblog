@@ -1,9 +1,19 @@
-from flask import render_template, flash, redirect, url_for
-from flask_login import current_user, login_user, logout_user
+from datetime import datetime
+from functools import wraps
+from flask import g, request, render_template, flash, redirect, url_for
+from flask_login import logout_user, current_user
 from microblog import app, db
-from .forms import LoginForm
-from .oauth import OAuthSignIn
+from .forms import LoginForm, EditForm
 from .models import User
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 @app.route('/')
@@ -26,6 +36,7 @@ def index():
                            user=user,
                            posts=posts)
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -41,50 +52,56 @@ def login():
                            providers=app.config['OPENID_PROVIDERS'])
 
 
-# ensures that the user is not logged in
-# obtains the OAuthSignIn subclass appropriate for the given provider
-@app.route('/autorize/<provider>')
-def oauth_authorize(provider):
-    if not current_user.is_anonymous:
-
-        return redirect(url_for('index'))
-
-    oauth = OAuthSignIn.get_provider(provider)
-
-    return oauth.authorize()
-
-
-# the OAuth provider redirects back to the application after the user authenticates
-# and gives permission to share information
-@app.route('/callback/<provider>')
-def oauth_callback(provider):
-    if not current_user.is_anonymous:
-
-        return redirect(url_for('index'))
-
-    oauth = OAuthSignIn.get_provider(provider)
-    social_id, username, email = oauth.callback()
-    if social_id is None:
-        flash('Authentication failed')
-
-        return redirect(url_for('index'))
-
-    user = User.query.filter_by(social_id=social_id).first()
-    if not user:
-        user = User(social_id=social_id, nickname=username, email=email)
-        print(user.nickname)
-        db.session.add(user)
-        db.session.commit()
-
-    login_user(user, True)
-    print('user is logged in!')
-
-    return redirect(url_for('index'))
-
-
 @app.route('/logout')
 def logout():
     logout_user()
 
     return redirect(url_for('index'))
 
+
+@app.before_request
+def before_request():
+    g.user = current_user
+    if g.user.is_authenticated:
+        g.user.last_seen = datetime.utcnow()
+        db.session.add(g.user)
+        db.session.commit()
+
+
+@app.route('/user/<nickname>')
+@login_required
+def user_profile(nickname):
+    user = User.query.filter_by(nickname=nickname).first()
+    if user is None:
+        flash('User {} not found.'.format(nickname))
+
+        return redirect(url_for('index'))
+
+    posts = [
+        {'author': user, 'body': 'Test post #1'},
+        {'author': user, 'body': 'Test post #2'}
+    ]
+
+    return render_template('user.html',
+                           user=user,
+                           posts=posts)
+
+
+@app.route('/edit', methods=['GET', 'POST'])
+@login_required
+def edit():
+    form = EditForm()
+    if form.validate_on_submit():
+        g.user.nickname = form.nickname.data
+        g.user.about_me = form.about_me.data
+        db.session.add(g.user)
+        db.session.commit()
+        flash('Your changes will be saved')
+
+        return redirect(url_for('index'))
+
+    else:
+        form.nickname.data = g.user.nickname
+        form.about_me.data = g.user.about_me
+
+        return render_template('edit.html', form=form)
