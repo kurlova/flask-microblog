@@ -1,8 +1,8 @@
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
-from flask_mail import Mail, Message
-from config import basedir, ADMINS, MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD
+from config import logdir
 
 
 app = Flask(__name__)  # creates the application object (of class Flask)
@@ -11,7 +11,6 @@ app.config.from_object('config')
 db = SQLAlchemy(app)
 lm = LoginManager(app)
 lm.init_app(app)
-mail = Mail(app)
 
 # Views module needs to import the app variable defined in this script.
 # That's why we import app here, not in the beginning
@@ -21,11 +20,17 @@ from microblog import views, models, oauth_routes, error_routes
 def load_user(id):
     return models.User.query.get(int(id))
 
+# configuring logging
+if not os.path.exists(logdir):
+    os.makedirs(logdir)
+
 if not app.debug:
-    msg = Message('flask microblog message',
-                  sender=(MAIL_USERNAME, MAIL_PASSWORD),
-                  recipients=ADMINS
-                  )
-    msg.body = 'App is working!'
-    with app.app_context():
-        mail.send(msg)
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    file_handler = RotatingFileHandler('tmp/microblog.log', 'a', 1*1024*1024, 10)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s: %(lineno)d]'))
+    app.logger.setLevel(logging.INFO)
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.info('microblog startup')

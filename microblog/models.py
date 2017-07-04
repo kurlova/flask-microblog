@@ -7,7 +7,7 @@ class User(UserMixin, db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
-    social_id = db.Column(db.String(64), nullable=False, unique=True)
+    social_id = db.Column(db.String(64), unique=True)
     nickname = db.Column(db.String(64), index=True, unique=True)
     email = db.Column(db.String(120), index=True, unique=True)
     about_me = db.Column(db.String(500))
@@ -27,6 +27,22 @@ class User(UserMixin, db.Model):
         except:
             return 'http://www.gravatar.com/avatar/{0}?d=identicon&s={1}'.format(md5(self.nickname.encode('utf-8')).hexdigest(),
                                                                           size)
+
+    @staticmethod
+    def make_unique_nickname(nickname):
+        if User.query.filter_by(nickname=nickname).first() is None:
+            return nickname
+
+        version = 2
+
+        while True:
+            new_nickname = nickname + str(version)
+            if User.query.filter_by(nickname=new_nickname).first() is None:
+                break
+
+            version += 1
+
+        return new_nickname
 
 
 class Post(db.Model):
